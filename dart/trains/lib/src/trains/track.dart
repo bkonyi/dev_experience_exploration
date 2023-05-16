@@ -7,14 +7,32 @@ import 'package:collection/collection.dart';
 typedef _PQTrackNode = ({TrackNode node, int weight});
 
 class Track {
-  Track.fromGraph({required this.verticies});
+  Track.fromGraph({required this.verticies})
+      : _nameToNode = {
+          for (final vertex in verticies) vertex.name: vertex,
+        };
+
+  factory Track.empty() => Track.fromGraph(verticies: []);
 
   /// The set of verticies that make up the [Track].
   final List<TrackNode> verticies;
 
+  late final Set<TrackEdge> edges = {
+    for (final node in verticies) ...{
+      if (node.straight != null) node.straight!,
+      if (node.curve != null) node.curve!,
+      if (node.reverseStraight != null) node.reverseStraight!,
+      if (node.reverseCurve != null) node.reverseCurve!,
+    }
+  };
+
+  UnmodifiableMapView<String, TrackNode> get nameToNode =>
+      UnmodifiableMapView(_nameToNode);
+  final Map<String, TrackNode> _nameToNode;
+
   /// Finds the shortest path between [start] and [finish] using Dijkstra's
   /// algorithm.
-  /// 
+  ///
   /// If [allowBackwardMovement] is true, paths that require a train to reverse
   /// will be considered.
   List<TrackNode> findPath({
@@ -101,7 +119,12 @@ class TrackNode {
     required this.name,
   });
 
+  BranchDirection switchState = BranchDirection.straight;
+
   final String name;
+
+  int get edgeCount => _forwardEdges.length + _backwardEdges.length;
+
   TrackEdge? get straight {
     if (_forwardEdges.isEmpty) {
       return null;
@@ -226,4 +249,7 @@ class TrackEdge {
   final TrackNode destination;
   late final TrackEdge reverse;
   final int length;
+
+  @override
+  String toString() => '[${source.name}->${destination.name}]';
 }
