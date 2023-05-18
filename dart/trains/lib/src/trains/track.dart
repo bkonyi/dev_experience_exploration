@@ -2,6 +2,9 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:developer';
+import 'dart:math';
+
 import 'package:collection/collection.dart';
 
 typedef _PQTrackNode = ({TrackNode node, int weight});
@@ -16,6 +19,8 @@ class Track {
 
   /// The set of verticies that make up the [Track].
   final List<TrackNode> verticies;
+
+  TrackNode get randomNode => verticies[Random().nextInt(verticies.length)];
 
   late final Set<TrackEdge> edges = {
     for (final node in verticies) ...{
@@ -40,69 +45,72 @@ class Track {
     required TrackNode finish,
     bool allowBackwardMovement = true,
   }) {
-    final path = <TrackNode>[];
+    return Timeline.timeSync('findPath', () {
+      print('finding path from $start to $finish');
+      final path = <TrackNode>[];
 
-    final priorityQueue = PriorityQueue<_PQTrackNode>(
-      // b.compareTo(a) will cause this queue to behave like a min heap.
-      (a, b) => b.weight.compareTo(a.weight),
-    );
+      final priorityQueue = PriorityQueue<_PQTrackNode>(
+        // b.compareTo(a) will cause this queue to behave like a min heap.
+        (a, b) => b.weight.compareTo(a.weight),
+      );
 
-    final distances = <TrackNode, int>{};
-    final predecessors = <TrackNode, TrackNode>{};
+      final distances = <TrackNode, int>{};
+      final predecessors = <TrackNode, TrackNode>{};
 
-    // Distance to the start node is always 0.
-    distances[start] = 0;
+      // Distance to the start node is always 0.
+      distances[start] = 0;
 
-    // Initialize distances to infinity.
-    const intMax = 0x7fffffffffffffff;
-    for (final vertex in verticies) {
-      if (vertex != start) {
-        distances[vertex] = intMax;
-      }
-    }
-
-    // Add the start node to the queue with weight 0. Additional nodes will be
-    // initialized and added to the queue as we reach them.
-    priorityQueue.add((node: start, weight: 0));
-
-    while (priorityQueue.isNotEmpty) {
-      final (node: current, weight: _) = priorityQueue.removeFirst();
-      final straight = current.straight;
-      final curve = current.curve;
-      final reverseStraight = current.reverseStraight;
-      final reverseCurve = current.reverseCurve;
-
-      final neighbours = <TrackEdge>[
-        if (straight != null) straight,
-        if (curve != null) curve,
-        if (allowBackwardMovement) ...[
-          if (reverseStraight != null) reverseStraight,
-          if (reverseCurve != null) reverseCurve,
-        ],
-      ];
-
-      for (final neighbour in neighbours) {
-        final distance = distances[current]! + neighbour.length;
-        if (distance < distances[neighbour.destination]!) {
-          distances[neighbour.destination] = distance;
-          predecessors[neighbour.destination] = current;
-          priorityQueue.add((node: neighbour.destination, weight: distance));
+      // Initialize distances to infinity.
+      const intMax = 0x7fffffffffffffff;
+      for (final vertex in verticies) {
+        if (vertex != start) {
+          distances[vertex] = intMax;
         }
       }
-    }
 
-    TrackNode currentNode = finish;
-    // Find the path from finish to start.
-    while (true) {
-      path.add(currentNode);
-      if (currentNode == start) {
-        break;
+      // Add the start node to the queue with weight 0. Additional nodes will be
+      // initialized and added to the queue as we reach them.
+      priorityQueue.add((node: start, weight: 0));
+
+      while (priorityQueue.isNotEmpty) {
+        final (node: current, weight: _) = priorityQueue.removeFirst();
+        final straight = current.straight;
+        final curve = current.curve;
+        final reverseStraight = current.reverseStraight;
+        final reverseCurve = current.reverseCurve;
+
+        final neighbours = <TrackEdge>[
+          if (straight != null) straight,
+          if (curve != null) curve,
+          if (allowBackwardMovement) ...[
+            if (reverseStraight != null) reverseStraight,
+            if (reverseCurve != null) reverseCurve,
+          ],
+        ];
+
+        for (final neighbour in neighbours) {
+          final distance = distances[current]! + neighbour.length;
+          if (distance < distances[neighbour.destination]!) {
+            distances[neighbour.destination] = distance;
+            predecessors[neighbour.destination] = current;
+            priorityQueue.add((node: neighbour.destination, weight: distance));
+          }
+        }
       }
-      currentNode = predecessors[currentNode]!;
-    }
 
-    // Path is finish -> start, so reverse it before returning.
-    return path.reversed.toList();
+      TrackNode currentNode = finish;
+      // Find the path from finish to start.
+      while (true) {
+        path.add(currentNode);
+        if (currentNode == start) {
+          break;
+        }
+        currentNode = predecessors[currentNode]!;
+      }
+
+      // Path is finish -> start, so reverse it before returning.
+      return path.reversed.toList();
+    });
   }
 
   void dumpGraphDetails() {
@@ -237,6 +245,16 @@ class TrackNode {
     buffer.write(']');
     return buffer.toString();
   }
+
+  // TODO(bkonyi): figure out how to include TrackEdges in the comparison.
+  @override
+  bool operator ==(Object other) {
+    if (other is! TrackNode) return false;
+    return other.name == name;
+  }
+
+  @override
+  int get hashCode => name.hashCode;
 }
 
 class TrackEdge {

@@ -3,11 +3,13 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:data_table_2/data_table_2.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:trains/src/ui/trains_controller.dart';
+import '../trains/dispatch_events.dart';
+import '../trains/dispatcher.dart';
+import 'trains_controller.dart';
 
 import '../trains/track.dart';
-import '../trains/train.dart';
 
 class TrainsAndTrackViewer extends StatefulWidget {
   const TrainsAndTrackViewer({super.key});
@@ -20,8 +22,19 @@ class _TrainsAndTrackViewerState extends State<TrainsAndTrackViewer> {
   final controller = TrainsController();
 
   @override
+  void initState() {
+    super.initState();
+    for (int i = 0; i < 3; ++i) {
+      controller.centralDispatch
+          .spawnTrain(name: 'Test $i')
+          .then((dispatcher) async {
+        dispatcher.navigateTo(controller.track.verticies.last);
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    controller.conductors;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
@@ -30,6 +43,7 @@ class _TrainsAndTrackViewerState extends State<TrainsAndTrackViewer> {
       body: Row(
         children: [
           Flexible(
+            flex: 2,
             child: EdgesTable(
               controller: controller,
             ),
@@ -39,6 +53,7 @@ class _TrainsAndTrackViewerState extends State<TrainsAndTrackViewer> {
             thickness: 2,
           ),
           Flexible(
+            flex: 4,
             child: TrainsTable(
               controller: controller,
             ),
@@ -68,12 +83,13 @@ class EdgesTable extends StatelessWidget {
             columns: const [
               DataColumn2(
                 label: Text('Edge'),
-                //fixedWidth: 100,
               ),
               DataColumn2(
                 label: Text('Length'),
-                //fixedWidth: 80,
                 numeric: true,
+              ),
+              DataColumn2(
+                label: Text('Reserved by'),
               ),
             ],
             rows: [
@@ -82,6 +98,7 @@ class EdgesTable extends StatelessWidget {
                   cells: [
                     DataCell(TrackEdgeName(edge: edge)),
                     DataCell(TrackEdgeLength(edge: edge)),
+                    const DataCell(Text('N/A')),
                   ],
                 ),
             ],
@@ -132,74 +149,91 @@ class TrainsTable extends StatelessWidget {
       children: [
         const TableHeader('Trains'),
         Expanded(
-          child: DataTable2(
-            columns: const [
-              DataColumn2(
-                label: Text('Name'),
-                //fixedWidth: 100,
-              ),
-              DataColumn2(
-                label: Text('Current'),
-                //fixedWidth: 80,
-              ),
-              DataColumn2(
-                label: Text('Offset'),
-                //fixedWidth: 80,
-              ),
-              DataColumn2(
-                label: Text('Destination'),
-              ),
-              DataColumn2(
-                label: Text('Reservations'),
-              ),
-            ],
-            rows: [
-              for (final conductor in controller.conductors)
-                DataRow(
-                  cells: [
-                    DataCell(Text(
-                      conductor.train.name,
-                    )),
-                    DataCell(
-                      TrainUpdaterWidget(
-                        train: conductor.train,
-                        builder: (context, train) {
-                          return Text(train.position.node.name);
-                        },
-                      ),
+          child: ValueListenableBuilder<Map<String, Dispatcher>>(
+            valueListenable: controller.centralDispatch.dispatchers,
+            builder: (context, dispatchers, _) {
+              return DataTable2(
+                columns: const [
+                  DataColumn2(
+                    label: Text('Name'),
+                  ),
+                  DataColumn2(
+                    label: Text('Velocity'),
+                  ),
+                  DataColumn2(
+                    label: Text('Current'),
+                  ),
+                  DataColumn2(
+                    label: Text('Offset'),
+                  ),
+                  DataColumn2(
+                    label: Text('Destination'),
+                  ),
+                  DataColumn2(
+                    label: Text('Reservations'),
+                  ),
+                ],
+                rows: [
+                  for (final conductor in dispatchers.values)
+                    DataRow(
+                      cells: [
+                        DataCell(Text(
+                          conductor.name,
+                        )),
+                        DataCell(
+                          TrainUpdaterWidget(
+                            position: conductor.trainPosition,
+                            builder: (context, position) {
+                              // Make sure we don't display -0.0.
+                              if (position.velocity == 0) {
+                                return '0.0';
+                              }
+                              return position.velocity.toStringAsFixed(1);
+                            },
+                          ),
+                        ),
+                        DataCell(
+                          TrainUpdaterWidget(
+                            position: conductor.trainPosition,
+                            builder: (context, position) {
+                              final currentEdge = position.position.currentEdge;
+                              if (currentEdge != null) {
+                                return currentEdge.toString();
+                              }
+                              return position.position.node.name;
+                            },
+                          ),
+                        ),
+                        DataCell(
+                          TrainUpdaterWidget(
+                            position: conductor.trainPosition,
+                            builder: (context, position) {
+                              return position.position.offset
+                                  .toStringAsFixed(1);
+                            },
+                          ),
+                        ),
+                        DataCell(
+                          ValueListenableBuilder<TrackNode?>(
+                            valueListenable: conductor.currentDestination,
+                            builder: (context, currentDestination, _) {
+                              return Text(currentDestination?.name ?? 'N/A');
+                            },
+                          ),
+                        ),
+                        DataCell(
+                          TrainUpdaterWidget(
+                            position: conductor.trainPosition,
+                            builder: (context, train) {
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                    DataCell(
-                      TrainUpdaterWidget(
-                        train: conductor.train,
-                        builder: (context, train) {
-                          return Text(
-                            train.position.offset.toStringAsFixed(1),
-                          );
-                        },
-                      ),
-                    ),
-                    DataCell(
-                      TrainUpdaterWidget(
-                        train: conductor.train,
-                        builder: (context, train) {
-                          return Text(
-                            train.position.currentEdge?.destination.name ??
-                                'N/A',
-                          );
-                        },
-                      ),
-                    ),
-                    DataCell(
-                      TrainUpdaterWidget(
-                        train: conductor.train,
-                        builder: (context, train) {
-                          return const Text('N/A');
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-            ],
+                ],
+              );
+            },
           ),
         ),
       ],
@@ -209,16 +243,27 @@ class TrainsTable extends StatelessWidget {
 
 class TrainUpdaterWidget extends StatelessWidget {
   const TrainUpdaterWidget(
-      {super.key, required this.train, required this.builder});
+      {super.key, required this.position, required this.builder});
 
-  final Train train;
-  final Widget Function(BuildContext, Train) builder;
+  final ValueListenable<TrainPositionEvent?> position;
+  final String? Function(BuildContext, TrainPositionEvent) builder;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: train.position,
-      builder: (context, _) => builder(context, train),
+    return ValueListenableBuilder<TrainPositionEvent?>(
+      valueListenable: position,
+      builder: (context, position, _) {
+        // ignore: constant_identifier_names
+        const NAText = Text('N/A');
+        if (position == null) {
+          return NAText;
+        }
+        final result = builder(context, position);
+        if (result == null) {
+          return NAText;
+        }
+        return Text(result);
+      },
     );
   }
 }

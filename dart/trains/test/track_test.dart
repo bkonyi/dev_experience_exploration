@@ -2,6 +2,8 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:isolate';
+
 import 'package:test/test.dart';
 import 'package:trains/src/trains/track.dart';
 import 'package:trains/src/trains/train.dart';
@@ -57,12 +59,15 @@ void main() {
         ['A', 'H', 'O', 'J', 'K', 'T', 'Y', 'Z', 'AE'],
       );
 
+      final port = ReceivePort();
       final navigator = TrainConductor(
         name: 'Train',
         track: track,
         startDirection: TrainDirection.forward,
         startPosition: start,
+        sendPort: port.sendPort,
       );
+
       final events = navigator.createEventsFromPath(
         initialDirection: TrainDirection.forward,
         path: shortestPath,

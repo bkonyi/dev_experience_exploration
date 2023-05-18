@@ -2,10 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:isolate';
+
 import 'package:test/test.dart';
 import 'package:trains/src/trains/track.dart';
 
 import 'package:trains/src/trains/train.dart';
+import 'package:trains/src/trains/train_conductor.dart';
 
 import 'package:trains/tracks.dart';
 
@@ -25,16 +28,19 @@ void tick(Train train) {
 
 void main() {
   group('Train', () {
+    late TrainConductor conductor;
     late Train train;
 
     setUp(() {
       final track = Track.fromGraph(verticies: buildSimpleTrack());
-      train = Train(
+      conductor = TrainConductor(
         name: 'Test Train',
         track: track,
         startDirection: TrainDirection.forward,
         startPosition: track.verticies.first,
+        sendPort: ReceivePort().sendPort,
       );
+      train = conductor.train;
     });
 
     test('accelerates to max velocity then decelerates to a stop', () {
@@ -44,6 +50,7 @@ void main() {
 
       // Train starts stopped
       expectTrainStopped(train);
+      train.start();
 
       // Accelerate the train
       final ticksUntilMaxVelocity = (maxSpeed / accelerationRate).ceil();
@@ -98,6 +105,7 @@ void main() {
 
       // Train starts stopped
       expectTrainStopped(train);
+      train.start();
 
       // Accelerate the train
       final ticksUntilMaxVelocity = (maxVelocity / accelerationRate).ceil();

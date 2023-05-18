@@ -2,7 +2,10 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:isolate';
+
 import 'package:test/test.dart';
+import 'package:trains/src/trains/navigation_events.dart';
 import 'package:trains/src/trains/track.dart';
 import 'package:trains/src/trains/train.dart';
 import 'package:trains/src/trains/train_conductor.dart';
@@ -48,11 +51,13 @@ void main() {
         ['A', 'H', 'O', 'J', 'K', 'T', 'Y', 'Z', 'AE'],
       );
 
+      final port = ReceivePort();
       final navigator = TrainConductor(
         name: 'Test',
         track: track,
         startDirection: TrainDirection.forward,
         startPosition: track.verticies.first,
+        sendPort: port.sendPort,
       );
       final train = navigator.train;
 
@@ -154,11 +159,13 @@ void main() {
       // TODO: can this test be written to execute the same behavior without
       // explicitly using a timer?
       final track = Track.fromGraph(verticies: buildStraightLine());
+      final port = ReceivePort();
       final conductor = TrainConductor(
         name: 'Test',
         track: track,
         startDirection: TrainDirection.forward,
         startPosition: track.verticies.first,
+        sendPort: port.sendPort,
       );
 
       final start = track.verticies.first; // A

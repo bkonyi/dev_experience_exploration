@@ -5,32 +5,22 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:flutter/material.dart';
 import 'package:trains/src/trains/track.dart';
+import 'package:trains/src/trains/train_conductor.dart';
 
 class Train {
   Train({
+    required this.conductor,
     required this.name,
     required this.track,
     required TrainDirection startDirection,
     required TrackNode startPosition,
-    bool autoUpdatePosition = false,
   }) {
     position = TrainPosition(train: this, node: startPosition);
     physics.direction = startDirection;
-
-    _lastUpdate = DateTime.now();
-    if (autoUpdatePosition) {
-      const updateFrequencyMs = 10;
-      Timer.periodic(const Duration(milliseconds: updateFrequencyMs), (timer) {
-        updatePosition(notify: timer.tick % (1000 / updateFrequencyMs) == 0);
-        if (timer.tick % (1000 / updateFrequencyMs) == 0) {
-          print(this);
-        }
-      });
-    }
   }
 
+  final TrainConductor conductor;
   final String name;
   final Track track;
 
@@ -41,6 +31,21 @@ class Train {
   bool get isStopped => physics.currentVelocity == 0;
 
   TrainDirection get direction => physics.direction;
+
+  bool _updatesActive = false;
+
+  void startTrainUpdates() {
+    if (_updatesActive) return;
+    _updatesActive = true;
+    const updateFrequencyMs = 10;
+    _lastUpdate = DateTime.now();
+    Timer.periodic(const Duration(milliseconds: updateFrequencyMs), (timer) {
+      updatePosition(notify: timer.tick % (1000 / updateFrequencyMs) == 0);
+      if (timer.tick % (1000 / updateFrequencyMs) == 0) {
+        print(this);
+      }
+    });
+  }
 
   /// Updates the current position of the train given a duration.
   ///
@@ -273,7 +278,7 @@ class TrainPhysics {
       '[acceleration rates: [$decelerationRate, $accelerationRate], velocity: ($currentVelocity / $maxSpeed)]';
 }
 
-class TrainPosition extends ChangeNotifier {
+class TrainPosition {
   TrainPosition({
     required this.train,
     required this.node,
@@ -292,12 +297,12 @@ class TrainPosition extends ChangeNotifier {
     // TODO(bkonyi): merge logic with _nextEdge
     currentEdge = _findNextEdge(node);
     print('${node} Branch direction change: $currentEdge');
-    notifyListeners();
+    train.conductor.sendPositionEvent();
   }
 
   void changeDirection() {
     currentEdge = _nextEdge;
-    notifyListeners();
+    train.conductor.sendPositionEvent();
   }
 
   void updatePosition(double distanceTravelled, bool notify) {
@@ -321,7 +326,7 @@ class TrainPosition extends ChangeNotifier {
       node = currentEdge!.source;
     }
     if (notify) {
-      notifyListeners();
+      train.conductor.sendPositionEvent();
     }
   }
 
@@ -338,22 +343,22 @@ class TrainPosition extends ChangeNotifier {
     if (edge == null) {
       print('No next edge, normalizing to ${node.name}');
       offset = 0;
-      return;
-    }
-    // If the train isn't within ~1 unit of a target node when we're trying to
-    // stop, something went wrong and we're in a bad state.
-    // TODO: confirm this is right
-    if (edge.length - offset >= 1 && offset >= 1) {
-      throw StateError('Train did not stop in range of the target node!');
-    }
-    if (edge.length - offset < 1) {
-      node = edge.destination;
-      currentEdge = _nextEdge;
     } else {
-      node = edge.source;
+      // If the train isn't within ~1 unit of a target node when we're trying to
+      // stop, something went wrong and we're in a bad state.
+      // TODO: confirm this is right
+      if (edge.length - offset >= 1 && offset >= 1) {
+        throw StateError('Train did not stop in range of the target node!');
+      }
+      if (edge.length - offset < 1) {
+        node = edge.destination;
+        currentEdge = _nextEdge;
+      } else {
+        node = edge.source;
+      }
+      offset = 0;
     }
-    offset = 0;
-    notifyListeners();
+    train.conductor.sendPositionEvent();
   }
 
   TrackEdge? get _nextEdge {
