@@ -284,5 +284,14 @@ class TrackReservationEvent extends TrainNavigationEvent {
   }
 
   @override
+  bool operator ==(Object other) {
+    if (other is! TrackReservationEvent) return false;
+    return edge == other.edge && train == other.train;
+  }
+
+  @override
   String toString() => '[TrackReservationEvent] $edge';
+  
+  @override
+  int get hashCode => Object.hash(edge, train);
 }

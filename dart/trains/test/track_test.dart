@@ -13,6 +13,16 @@ import 'package:trains/tracks.dart';
 
 void main() {
   group('Pathfinding', () {
+    setUp(() {
+      conductorInstance = TrainConductor(
+        name: '',
+        track: Track.empty(),
+        startDirection: TrainDirection.forward,
+        startPosition: TrackNode(name: ''),
+        sendPort: ReceivePort().sendPort,
+      );
+    });
+
     test('simple graph', () {
       final track = Track.fromGraph(verticies: buildSimpleTrack());
       track.dumpGraphDetails();

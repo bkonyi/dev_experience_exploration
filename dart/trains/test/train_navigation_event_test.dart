@@ -5,6 +5,8 @@
 import 'dart:isolate';
 
 import 'package:test/test.dart';
+import 'package:trains/src/trains/dispatch_events.dart';
+import 'package:trains/src/trains/dispatcher.dart';
 import 'package:trains/src/trains/navigation_events.dart';
 import 'package:trains/src/trains/track.dart';
 import 'package:trains/src/trains/train.dart';
@@ -40,6 +42,35 @@ void main() {
   group('Train navigation events', () {
     test('are in correct sequence', () async {
       final track = Track.fromGraph(verticies: buildCS452Track());
+
+      final port = ReceivePort();
+      late final SendPort sendPort;
+
+      // TODO(bkonyi): put this somewhere shared.
+      port.listen((message) {
+        return switch (message) {
+          SendPort() => sendPort = message,
+          TrainPositionEvent() => null,
+          TrainNavigationCompleteEvent() => null,
+          TrackReservationRequest(:TrackEdge edge) => sendPort.send(
+              TrackReservationConfirmation(edge: edge),
+            ),
+          TrackReservationRelease(edge: TrackEdge _) => null,
+          Object() ||
+          null =>
+            throw StateError('Unrecognized message: $message'),
+        };
+      });
+
+      conductorInstance = TrainConductor(
+        name: 'Test',
+        track: track,
+        startDirection: TrainDirection.forward,
+        startPosition: track.verticies.first,
+        sendPort: port.sendPort,
+      );
+
+      final train = conductorInstance.train;
       final start = track.verticies.first; // A
       final finish = track.verticies.last; // AE
       final shortestPath = track.findPath(
@@ -51,17 +82,7 @@ void main() {
         ['A', 'H', 'O', 'J', 'K', 'T', 'Y', 'Z', 'AE'],
       );
 
-      final port = ReceivePort();
-      final navigator = TrainConductor(
-        name: 'Test',
-        track: track,
-        startDirection: TrainDirection.forward,
-        startPosition: track.verticies.first,
-        sendPort: port.sendPort,
-      );
-      final train = navigator.train;
-
-      final events = navigator.createEventsFromPath(
+      final events = conductorInstance.createEventsFromPath(
         initialDirection: TrainDirection.forward,
         path: shortestPath,
       );
@@ -78,11 +99,19 @@ void main() {
 
       expect(events, [
         TrainDirectionEvent(train: train, direction: TrainDirection.backward),
+        TrackReservationEvent(
+          train: train,
+          edge: nodeA.reverseStraight!,
+        ),
         TrainStartEvent(train: train),
         SwitchDirectionEvent(
           train: train,
           node: nodeA,
           direction: BranchDirection.straight,
+        ),
+        TrackReservationEvent(
+          train: train,
+          edge: nodeH.reverseStraight!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -96,21 +125,37 @@ void main() {
           distance: getDistance(shortestPath.sublist(0, 3)),
         ),
         TrainDirectionEvent(train: train, direction: TrainDirection.forward),
+        TrackReservationEvent(
+          train: train,
+          edge: nodeO.curve!,
+        ),
         SwitchDirectionEvent(
           train: train,
           node: nodeO,
           direction: BranchDirection.curve,
         ),
         TrainStartEvent(train: train),
+        TrackReservationEvent(
+          train: train,
+          edge: nodeJ.straight!,
+        ),
         SwitchDirectionEvent(
           train: train,
           node: nodeJ,
           direction: BranchDirection.straight,
         ),
+        TrackReservationEvent(
+          train: train,
+          edge: nodeK.straight!,
+        ),
         SwitchDirectionEvent(
           train: train,
           node: nodeK,
           direction: BranchDirection.straight,
+        ),
+        TrackReservationEvent(
+          train: train,
+          edge: nodeT.straight!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -124,6 +169,10 @@ void main() {
           distance: getDistance(shortestPath.sublist(2, 7)),
         ),
         TrainDirectionEvent(train: train, direction: TrainDirection.backward),
+        TrackReservationEvent(
+          train: train,
+          edge: nodeY.reverseCurve!,
+        ),
         SwitchDirectionEvent(
           train: train,
           node: nodeY,
@@ -137,6 +186,10 @@ void main() {
           distance: getDistance(shortestPath.sublist(7, 9)),
         ),
         TrainDirectionEvent(train: train, direction: TrainDirection.forward),
+        TrackReservationEvent(
+          train: train,
+          edge: nodeZ.straight!,
+        ),
         SwitchDirectionEvent(
           train: train,
           node: nodeZ,
@@ -151,7 +204,7 @@ void main() {
         ),
       ]);
 
-      await navigator.execute();
+      await conductorInstance.execute();
       expect(train.position.node, track.verticies.last);
     }, timeout: Timeout.none);
 
@@ -160,7 +213,25 @@ void main() {
       // explicitly using a timer?
       final track = Track.fromGraph(verticies: buildStraightLine());
       final port = ReceivePort();
-      final conductor = TrainConductor(
+      late final SendPort sendPort;
+
+      // TODO(bkonyi): put this somewhere shared.
+      port.listen((message) {
+        return switch (message) {
+          SendPort() => sendPort = message,
+          TrainPositionEvent() => null,
+          TrainNavigationCompleteEvent() => null,
+          TrackReservationRequest(:TrackEdge edge) => sendPort.send(
+              TrackReservationConfirmation(edge: edge),
+            ),
+          TrackReservationRelease(edge: TrackEdge _) => null,
+          Object() ||
+          null =>
+            throw StateError('Unrecognized message: $message'),
+        };
+      });
+
+      conductorInstance = TrainConductor(
         name: 'Test',
         track: track,
         startDirection: TrainDirection.forward,
@@ -173,14 +244,14 @@ void main() {
       final path = track.findPath(start: start, finish: finish);
       expect(path.length, 3);
 
-      final events = conductor.createEventsFromPath(
+      final events = conductorInstance.createEventsFromPath(
         initialDirection: TrainDirection.forward,
         path: path,
       );
-      expect(events.length, 4);
-      await conductor.execute();
-      expect(conductor.train.position.currentEdge, finish.straight);
-      expect(conductor.train.position.offset, 0.0);
+      expect(events.length, 6);
+      await conductorInstance.execute();
+      expect(conductorInstance.train.position.currentEdge, finish.straight);
+      expect(conductorInstance.train.position.offset, 0.0);
     });
   });
 }

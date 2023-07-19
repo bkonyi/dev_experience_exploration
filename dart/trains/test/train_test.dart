@@ -28,19 +28,18 @@ void tick(Train train) {
 
 void main() {
   group('Train', () {
-    late TrainConductor conductor;
     late Train train;
 
     setUp(() {
       final track = Track.fromGraph(verticies: buildSimpleTrack());
-      conductor = TrainConductor(
+      conductorInstance = TrainConductor(
         name: 'Test Train',
         track: track,
         startDirection: TrainDirection.forward,
         startPosition: track.verticies.first,
         sendPort: ReceivePort().sendPort,
       );
-      train = conductor.train;
+      train = conductorInstance.train;
     });
 
     test('accelerates to max velocity then decelerates to a stop', () {

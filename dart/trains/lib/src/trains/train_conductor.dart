@@ -13,7 +13,7 @@ import 'package:trains/src/trains/train.dart';
 import 'dispatch_events.dart';
 import 'navigation_events.dart';
 
-late final TrainConductor conductorInstance;
+late TrainConductor conductorInstance;
 
 void trainConductorEntry(
   TrainConductorInitializationRequest initializationEvent,
@@ -199,12 +199,12 @@ class TrainConductor {
 
       // Special case. We can't start moving until we've reserved the first
       // track edge.
-      if (i != 0) {
+      /*if (i != 0) {
         events.add(TrackReservationEvent(
           train: train,
           edge: edge,
         ));
-      }
+      }*/
 
       // The train needs to stop when changing direction, so terminate the
       // navigation event and start the next one.
@@ -221,6 +221,11 @@ class TrainConductor {
         events.add(TrainDirectionEvent(
           train: train,
           direction: direction,
+        ));
+
+        events.add(TrackReservationEvent(
+          train: train,
+          edge: edge,
         ));
 
         // Ensure the switch is set to the right direction. This needs to be
@@ -241,6 +246,13 @@ class TrainConductor {
         currentDirection = direction;
         segmentLength = 0.0;
       } else {
+        if (i != 0) {
+          events.add(TrackReservationEvent(
+            train: train,
+            edge: edge,
+          ));
+        }
+
         // Ensure the next switch is set to the right direction.
         events.add(SwitchDirectionEvent(
           train: train,
