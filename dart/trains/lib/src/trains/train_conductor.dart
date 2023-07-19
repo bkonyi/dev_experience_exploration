@@ -6,25 +6,33 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:math';
 
+import 'package:logging/logging.dart';
 import 'package:trains/src/trains/track.dart';
 import 'package:trains/src/trains/train.dart';
 
 import 'dispatch_events.dart';
 import 'navigation_events.dart';
 
+late final TrainConductor conductorInstance;
+
 void trainConductorEntry(
   TrainConductorInitializationRequest initializationEvent,
 ) {
-  final track = initializationEvent.track;
-  final conductor = TrainConductor(
-    name: initializationEvent.name,
-    track: track,
-    startDirection:
-        initializationEvent.startDirection ?? TrainDirection.forward,
-    startPosition: initializationEvent.startPosition ??
-        track.verticies[Random().nextInt(track.verticies.length)],
-    sendPort: initializationEvent.sendPort,
-  );
+  runZonedGuarded(() {
+    final track = initializationEvent.track;
+    conductorInstance = TrainConductor(
+      name: initializationEvent.name,
+      track: track,
+      startDirection:
+          initializationEvent.startDirection ?? TrainDirection.forward,
+      startPosition: initializationEvent.startPosition ??
+          track.verticies[Random().nextInt(track.verticies.length)],
+      sendPort: initializationEvent.sendPort,
+    );
+  }, (error, stack) {
+    conductorInstance.log.shout(error, null, stack);
+    conductorInstance.sendExceptionEvent();
+  });
 }
 
 /// Handles pathfinding and train control.
@@ -45,33 +53,43 @@ class TrainConductor {
           startDirection: startDirection,
           startPosition: startPosition,
         );
+    Logger.root.level = Level.FINE;
+    Logger.root.onRecord.listen((record) {
+      if (record.stackTrace != null) {
+        print(
+            '[${record.loggerName}] EXCEPTION: ${record.message}\n${record.stackTrace}');
+        return;
+      }
+      print('[${record.loggerName}] ${record.message}');
+    });
     receivePort.listen(_messageHandler);
     sendPort.send(receivePort.sendPort);
     this.train.startTrainUpdates();
     sendPositionEvent();
   }
 
+  late final log = Logger(name);
   final String name;
   final Track track;
-  final path = <TrackNode>[];
+  final edgePath = <TrackEdge>[];
+  final currentReservations = <TrackEdge>[];
   final events = <TrainNavigationEvent>[];
   late final Train train;
 
   final SendPort sendPort;
   final ReceivePort receivePort;
+  Completer<void>? _trackReservationResponseCompleter;
 
-  void _messageHandler(dynamic message) {
-    switch (message.runtimeType) {
-      case TrainNavigateToRequest:
-        navigateTo(message);
-      default:
-        throw StateError(
-          'Unrecognized message: ${message.runtimeType}',
-        );
-    }
-  }
+  void _messageHandler(dynamic message) => switch (message) {
+        TrainNavigateToRequest() => navigateTo(message),
+        TrackReservationConfirmation() => _confirmReservation(),
+        Object() || null => throw StateError(
+            'Unrecognized message: ${message.runtimeType}',
+          ),
+      };
 
   void navigateTo(TrainNavigateToRequest request) {
+    log.fine('Start node: ${train.position.node}');
     final path = track.findPath(
       start: train.position.node,
       finish: request.destination,
@@ -81,6 +99,19 @@ class TrainConductor {
       path: path,
     );
     execute();
+  }
+
+  void _confirmReservation() {
+    final completer = _trackReservationResponseCompleter;
+    if (completer == null) {
+      throw StateError('Attempted to confirm non-existent reservation!');
+    }
+    _trackReservationResponseCompleter = null;
+    completer.complete();
+  }
+
+  void sendExceptionEvent() {
+    sendPort.send(const ExceptionEvent());
   }
 
   void sendPositionEvent() {
@@ -93,24 +124,55 @@ class TrainConductor {
     sendPort.send(event);
   }
 
+  Future<void> sendTrackReservationRequest(TrackEdge edge) async {
+    if (!edgePath.contains(edge)) {
+      throw StateError(
+        'Attempted to reserve $edge, which is not in $edgePath!',
+      );
+    }
+    sendPort.send(TrackReservationRequest(edge: edge));
+    _trackReservationResponseCompleter = Completer<void>();
+    await _trackReservationResponseCompleter!.future;
+    log.fine('Reserved $edge!');
+    currentReservations.add(edge);
+    return;
+  }
+
+  void sendTrackReservationRelease(TrackEdge edge) {
+    log.fine('Releasing reservation for $edge');
+    final expected = edgePath.removeAt(0);
+    currentReservations.removeAt(0);
+    log.fine('Remaining path: $edgePath');
+    log.fine('Remaining reservations: $currentReservations');
+    if (expected != edge) {
+      throw StateError(
+        'Attempted to release reservation for $edge when the expected edge is $expected',
+      );
+    }
+    sendPort.send(TrackReservationRelease(edge: edge));
+  }
+
   /// Creates a sequence of [TrainNavigationEvent]s based on a valid path.
   List<TrainNavigationEvent> createEventsFromPath({
     required TrainDirection initialDirection,
     required List<TrackNode> path,
   }) {
     events.clear();
+    edgePath.clear();
     if (path.length <= 1) {
       return events;
     }
+    log.fine('Creating events for path: $path');
     TrackNode current = path.first;
     TrackNode origin = path.first;
     TrainDirection currentDirection = train.physics.direction;
     double segmentLength = 0.0;
 
-    final (_, _, directionToFirstNode) = _determineNextEdge(
+    final (edge, _, directionToFirstNode) = _determineNextEdge(
       from: current,
       to: path[1],
     );
+
     // If the train is immediately changing direction at the beginning of the
     // path, just flip the direction of the train.
     if (directionToFirstNode != currentDirection) {
@@ -121,6 +183,12 @@ class TrainConductor {
       ));
     }
 
+    // Acquire the first track reservation before starting to move.
+    events.add(TrackReservationEvent(
+      train: train,
+      edge: edge,
+    ));
+
     // Start moving.
     events.add(TrainStartEvent(train: train));
 
@@ -128,6 +196,15 @@ class TrainConductor {
       final next = path[i + 1];
       final (edge, branch, direction) =
           _determineNextEdge(from: current, to: next);
+
+      // Special case. We can't start moving until we've reserved the first
+      // track edge.
+      if (i != 0) {
+        events.add(TrackReservationEvent(
+          train: train,
+          edge: edge,
+        ));
+      }
 
       // The train needs to stop when changing direction, so terminate the
       // navigation event and start the next one.
@@ -172,6 +249,7 @@ class TrainConductor {
         ));
       }
       segmentLength += edge.length;
+      edgePath.add(edge);
       current = next;
     }
 
@@ -182,6 +260,12 @@ class TrainConductor {
       distance: segmentLength,
     ));
 
+    log.fine('Events:');
+    int i = 0;
+    for (final event in events) {
+      log.fine('  [$i] $event');
+      ++i;
+    }
     return events;
   }
 

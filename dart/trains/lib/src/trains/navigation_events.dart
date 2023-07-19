@@ -5,8 +5,13 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:logging/logging.dart';
+import 'package:trains/src/trains/train_conductor.dart';
+
 import 'track.dart';
 import 'train.dart';
+
+late final eventLogger = Logger('${conductorInstance.name}: EVENT');
 
 sealed class TrainNavigationEvent {
   TrainNavigationEvent({
@@ -18,20 +23,22 @@ sealed class TrainNavigationEvent {
   Future<void> execute();
 }
 
-class TrainStopEvent extends TrainNavigationEvent {
-  TrainStopEvent({
-    required super.train,
-    required this.origin,
-    required this.destination,
-    required this.distance,
+class TrainStopper {
+  TrainStopper({
+    required this.train,
+    required this.debugName,
   });
 
-  final TrackNode origin;
-  final TrackNode destination;
-  final double distance;
+  final Train train;
+  final String debugName;
 
-  @override
-  Future<void> execute() async {
+  bool get isStopping => _isStopping;
+  bool _isStopping = false;
+
+  Timer? _stoppingTimer;
+  Timer? _stoppedTimer;
+
+  Future<void> scheduleStop(double distance) {
     late double timeToTriggerStop;
     late double timeToStop;
 
@@ -62,15 +69,18 @@ class TrainStopEvent extends TrainNavigationEvent {
     }
 
     final completer = Completer<void>();
-    print('[${train.name}] Scheduling stop in ${timeToTriggerStop}s');
-    Timer(
+    final eventLogger = train.conductor.log;
+    eventLogger.fine('[$debugName] Scheduling stop in ${timeToTriggerStop}s');
+    _stoppingTimer = Timer(
         Duration(
           milliseconds: (timeToTriggerStop * 1000).floor(),
         ), () {
+      _isStopping = true;
       train.stop();
-      print('[${train.name}] Stopping train');
-      Timer(Duration(milliseconds: (timeToStop * 1000).floor()), () {
-        print('[${train.name}] Stopped at ${train.position}');
+      eventLogger.fine('[$debugName] Stopping train');
+      _stoppedTimer =
+          Timer(Duration(milliseconds: (timeToStop * 1000).floor()), () {
+        eventLogger.fine('[$debugName] Stopped at ${train.position}');
 
         // The train probably won't stop exactly as the destination, but
         // we should be within ~1 unit and then just make an adjustment so we
@@ -78,12 +88,43 @@ class TrainStopEvent extends TrainNavigationEvent {
         train.position.normalizeToClosestNode();
         train.physics.forceStop();
 
-        print('[${train.name}] Normalized: ${train.position}');
+        eventLogger.fine('[$debugName] Normalized: ${train.position}');
 
+        _stoppingTimer = null;
+        _stoppedTimer = null;
         completer.complete();
       });
     });
     return completer.future;
+  }
+
+  void cancel() {
+    _stoppingTimer?.cancel();
+    _stoppedTimer?.cancel();
+    _isStopping = false;
+    _stoppingTimer = null;
+    _stoppedTimer = null;
+  }
+}
+
+class TrainStopEvent extends TrainNavigationEvent {
+  TrainStopEvent({
+    required super.train,
+    required this.origin,
+    required this.destination,
+    required this.distance,
+  });
+
+  final TrackNode origin;
+  final TrackNode destination;
+  final double distance;
+
+  @override
+  Future<void> execute() async {
+    await TrainStopper(
+      train: train,
+      debugName: 'Stop at ${destination.name}',
+    ).scheduleStop(distance);
   }
 
   @override
@@ -110,7 +151,7 @@ class TrainStartEvent extends TrainNavigationEvent {
     if (!train.isStopped) {
       throw StateError('Tried to start train that is moving!');
     }
-    print('[${train.name}] Starting acceleration');
+    eventLogger.fine('Starting acceleration');
     train.start();
   }
 
@@ -137,15 +178,16 @@ class TrainDirectionEvent extends TrainNavigationEvent {
 
   @override
   Future<void> execute() async {
+    final eventLogger = train.conductor.log;
     if (!train.isStopped) {
-      print('Train speed: ${train.physics.currentVelocity}');
+      eventLogger.shout('Train speed: ${train.physics.currentVelocity}');
       throw StateError('Tried to change train direction while moving!');
     }
     train.changeDirection();
     if (train.direction != direction) {
       throw StateError('Unexpected train direction!');
     }
-    print('[${train.name}] Setting train direction to ${train.direction}');
+    eventLogger.fine('Setting train direction to ${train.direction}');
   }
 
   @override
@@ -181,8 +223,9 @@ class SwitchDirectionEvent extends TrainNavigationEvent {
         'Tried to switch the branch direction on a node with no branch!',
       );
     }
-    print(
-      '[${train.name}] switching ${node.name} branch from ${node.switchState}->$direction',
+    final eventLogger = train.conductor.log;
+    eventLogger.fine(
+      'switching ${node.name} branch from ${node.switchState}->$direction',
     );
     node.switchState = direction;
     train.position.handleBranchDirectionChange();
@@ -200,4 +243,46 @@ class SwitchDirectionEvent extends TrainNavigationEvent {
   int get hashCode => Object.hashAll([train, direction, node]);
   @override
   String toString() => '[SwitchDirectionEvent] ${node.name} ${direction.name}';
+}
+
+class TrackReservationEvent extends TrainNavigationEvent {
+  TrackReservationEvent({
+    required super.train,
+    required this.edge,
+  });
+
+  final TrackEdge edge;
+
+  @override
+  Future<void> execute() async {
+    // We need to reserve the track represented by [edge] before we can enter
+    // the track segment. [TrainConductor.sendTrackReservationRequest] will
+    // block until the reservation is granted, so we need to start stopping the
+    // train if we are the train's stopping distance away from the beginning of
+    // the track segment.
+    final distanceToEdge = train.position.distanceToEdgeFollowingPath(edge);
+    final trainStopper = TrainStopper(
+      train: train,
+      debugName: 'Stop before $edge',
+    );
+
+    eventLogger.fine('Reserving $edge...');
+    final reservationComplete =
+        train.conductor.sendTrackReservationRequest(edge);
+    if (!train.isStopped) {
+      trainStopper.scheduleStop(distanceToEdge);
+    }
+
+    await reservationComplete.then((_) {
+      eventLogger.fine('$edge reserved!');
+      if (trainStopper.isStopping) {
+        eventLogger.fine('Started stopping while waiting for reservation!');
+        // TODO(bkonyi): recalulate events
+      }
+      trainStopper.cancel();
+    });
+  }
+
+  @override
+  String toString() => '[TrackReservationEvent] $edge';
 }

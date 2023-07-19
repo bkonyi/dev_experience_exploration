@@ -42,6 +42,10 @@ class TrainPositionData {
   final TrackEdge? currentEdge;
 }
 
+class ExceptionEvent {
+  const ExceptionEvent();
+}
+
 class TrainPositionEvent {
   const TrainPositionEvent({
     required this.name,
@@ -58,4 +62,22 @@ class TrainPositionEvent {
 
 class TrainNavigationCompleteEvent {
   const TrainNavigationCompleteEvent();
+}
+
+class TrackReservationRequest {
+  const TrackReservationRequest({required this.edge});
+
+  final TrackEdge edge;
+}
+
+class TrackReservationConfirmation {
+  const TrackReservationConfirmation({required this.edge});
+
+  final TrackEdge edge;
+}
+
+class TrackReservationRelease {
+  const TrackReservationRelease({required this.edge});
+
+  final TrackEdge edge;
 }

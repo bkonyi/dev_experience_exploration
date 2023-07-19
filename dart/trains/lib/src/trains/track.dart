@@ -6,6 +6,7 @@ import 'dart:developer';
 import 'dart:math';
 
 import 'package:collection/collection.dart';
+import 'package:trains/src/trains/train_conductor.dart';
 
 typedef _PQTrackNode = ({TrackNode node, int weight});
 
@@ -46,7 +47,7 @@ class Track {
     bool allowBackwardMovement = true,
   }) {
     return Timeline.timeSync('findPath', () {
-      print('finding path from $start to $finish');
+      conductorInstance.log.fine('finding path from $start to $finish');
       final path = <TrackNode>[];
 
       final priorityQueue = PriorityQueue<_PQTrackNode>(
@@ -115,7 +116,7 @@ class Track {
 
   void dumpGraphDetails() {
     for (final vertex in verticies) {
-      print(vertex.toDetailedString());
+      conductorInstance.log.finest(vertex.toDetailedString());
     }
   }
 }
@@ -270,4 +271,16 @@ class TrackEdge {
 
   @override
   String toString() => '[${source.name}->${destination.name}]';
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! TrackEdge) return false;
+    return source == other.source &&
+        destination == other.destination &&
+        //reverse == other.reverse &&
+        length == other.length;
+  }
+
+  @override
+  int get hashCode => Object.hash(source, destination, length);
 }

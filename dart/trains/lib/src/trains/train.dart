@@ -37,12 +37,13 @@ class Train {
   void startTrainUpdates() {
     if (_updatesActive) return;
     _updatesActive = true;
-    const updateFrequencyMs = 10;
+    const updateFrequencyMs = 25;
+    conductor.log.fine('[EDGE] Starting train at ${position.currentEdge}');
     _lastUpdate = DateTime.now();
     Timer.periodic(const Duration(milliseconds: updateFrequencyMs), (timer) {
       updatePosition(notify: timer.tick % (1000 / updateFrequencyMs) == 0);
       if (timer.tick % (1000 / updateFrequencyMs) == 0) {
-        print(this);
+//        conductor.log.fine(this);
       }
     });
   }
@@ -103,7 +104,7 @@ class Train {
   }
 
   @override
-  String toString() => '[$name] position: $position physics: $physics';
+  String toString() => 'position: $position physics: $physics';
 }
 
 enum TrainDirection {
@@ -199,7 +200,8 @@ class TrainPhysics {
   void forceStop() {
     if (_currentSpeed > 0.1) {
       throw StateError(
-          'Tried to force stop a moving train! Speed: $_currentSpeed');
+        'Tried to force stop a moving train! Speed: $_currentSpeed',
+      );
     }
     _currentSpeed = 0;
   }
@@ -294,29 +296,87 @@ class TrainPosition {
   TrackEdge? currentEdge;
 
   void handleBranchDirectionChange() {
-    // TODO(bkonyi): merge logic with _nextEdge
     currentEdge = _findNextEdge(node);
-    print('${node} Branch direction change: $currentEdge');
+    conductorInstance.log.fine('$node Branch direction change: $currentEdge');
     train.conductor.sendPositionEvent();
   }
 
   void changeDirection() {
-    currentEdge = _nextEdge;
+    // We should only ever be changing direction when at a node.
+    //
+    // When at a node, our current destination before changing direction is
+    // currentEdge.destination.
+    //
+    // When changing direction, we need to pick one of:
+    //  - node.reverseStraight
+    //  - node.reverseCurve
+
+    // TODO: remove
+    // currentEdge = _nextEdge;
+
+    final TrackEdge? straight = train.direction == TrainDirection.forward
+        ? node.straight
+        : node.reverseStraight;
+    final TrackEdge? curve = train.direction == TrainDirection.forward
+        ? node.curve
+        : node.reverseCurve;
+
+    if (straight != null && curve != null) {
+      currentEdge =
+          node.switchState == BranchDirection.straight ? straight : curve;
+    } else {
+      currentEdge = straight ?? curve;
+    }
     train.conductor.sendPositionEvent();
   }
 
   void updatePosition(double distanceTravelled, bool notify) {
     final edge = currentEdge;
+    final log = train.conductor.log;
     if (edge == null) {
       if (distanceTravelled != 0) {
-        print('WARNING: Tried to move down an invalid edge!');
+        if (!train.physics.stopping) {
+          throw StateError(
+            'Train is moving down an invalid edge and is not attempting to stop!',
+          );
+        }
+        if (train.physics.currentVelocity.abs() > 0.5) {
+          conductorInstance.log.warning(
+            'WARNING: Tried to move down an invalid edge! Velocity: ${train.physics.currentVelocity}',
+          );
+        }
       }
       return;
     }
     offset += distanceTravelled;
     while (offset > edge.length) {
       offset = offset - edge.length;
+      final previous = currentEdge;
       currentEdge = _nextEdge;
+      log.fine('[EDGE] Leaving $previous, entering $currentEdge');
+      // If the train is almost stopped,
+      final isAlmostStopped =
+          train.physics.stopping && train.physics.currentVelocity.abs() <= 4.0;
+
+      dumpTrainState() {
+        log.fine('Train speed: ${train.physics.currentVelocity.abs()}');
+        log.fine('Train stopping: ${train.physics.stopping}');
+      }
+      if (currentEdge != null && !isAlmostStopped) {
+        if (!train.conductor.edgePath.contains(currentEdge)) {
+          dumpTrainState();
+          throw StateError(
+            '$currentEdge is not on the path! ${train.conductor.edgePath}',
+          );
+        }
+        if (!train.conductor.currentReservations.contains(currentEdge)) {
+          dumpTrainState();
+          throw StateError(
+            '$currentEdge is not reserved! ${train.conductor.currentReservations}',
+          );
+        }
+      }
+      train.conductor.sendTrackReservationRelease(previous!);
     }
 
     if (currentEdge == null) {
@@ -341,24 +401,53 @@ class TrainPosition {
     // to assume that the train is coming to stop at the terminal, even if it
     // tries to overshoot.
     if (edge == null) {
-      print('No next edge, normalizing to ${node.name}');
+      train.conductor.log.fine('No next edge, normalizing to ${node.name}');
       offset = 0;
     } else {
       // If the train isn't within ~1 unit of a target node when we're trying to
       // stop, something went wrong and we're in a bad state.
       // TODO: confirm this is right
       if (edge.length - offset >= 1 && offset >= 1) {
+        train.conductor.log
+            .shout('Train did not stop in range of the target node!');
         throw StateError('Train did not stop in range of the target node!');
       }
       if (edge.length - offset < 1) {
         node = edge.destination;
         currentEdge = _nextEdge;
+
+        // Release the reservation as we're no longer on the edge.
+        train.conductor.sendTrackReservationRelease(edge);
       } else {
         node = edge.source;
       }
       offset = 0;
     }
     train.conductor.sendPositionEvent();
+  }
+
+  /// Returns the distance to the [target] edge following the current path
+  /// outlined by the train conductor.
+  double distanceToEdgeFollowingPath(TrackEdge target) {
+    double distance = 0.0;
+    bool found = false;
+    for (final edge in train.conductor.edgePath) {
+      if (edge == target) {
+        found = true;
+        break;
+      }
+      distance += edge.length;
+    }
+
+    if (!found) {
+      throw StateError(
+        'Was unable to find $target on ${train.conductor.edgePath}',
+      );
+    }
+    // Subtract the offset of the train as the train could be in the middle of
+    // the first edge.
+    distance -= train.position.offset;
+    return distance;
   }
 
   TrackEdge? get _nextEdge {

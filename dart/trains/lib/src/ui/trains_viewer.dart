@@ -2,33 +2,51 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'package:collection/collection.dart';
 import 'package:data_table_2/data_table_2.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../trains/dispatch_events.dart';
 import '../trains/dispatcher.dart';
+import '../trains/train.dart';
 import 'trains_controller.dart';
 
 import '../trains/track.dart';
 
 class TrainsAndTrackViewer extends StatefulWidget {
-  const TrainsAndTrackViewer({super.key});
+  const TrainsAndTrackViewer({super.key, required this.controller});
+
+  final TrainsController controller;
 
   @override
   State<TrainsAndTrackViewer> createState() => _TrainsAndTrackViewerState();
 }
 
 class _TrainsAndTrackViewerState extends State<TrainsAndTrackViewer> {
-  final controller = TrainsController();
+  late final controller = widget.controller;
+  static const start = null;//'AC';
+  static const String dest = 'N';
+  static const int trainCount = 2;
+  static const startDirection = TrainDirection.forward;
 
   @override
   void initState() {
     super.initState();
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < trainCount; ++i) {
       controller.centralDispatch
-          .spawnTrain(name: 'Test $i')
+          .spawnTrain(
+        name: 'Train $i',
+        startPosition: controller.track.verticies.firstWhereOrNull(
+          (e) => e.name == start,
+        ),
+        startDirection: startDirection,
+      )
           .then((dispatcher) async {
-        dispatcher.navigateTo(controller.track.verticies.last);
+        dispatcher.navigateTo(
+          controller.track.verticies.firstWhere(
+            (e) => e.name == dest,
+          ),
+        );
       });
     }
   }
@@ -98,7 +116,10 @@ class EdgesTable extends StatelessWidget {
                   cells: [
                     DataCell(TrackEdgeName(edge: edge)),
                     DataCell(TrackEdgeLength(edge: edge)),
-                    const DataCell(Text('N/A')),
+                    DataCell(TrackEdgeReserved(
+                      reservation: controller
+                          .centralDispatch.reservations[edge]!.reservedBy,
+                    )),
                   ],
                 ),
             ],
@@ -155,7 +176,12 @@ class TrainsTable extends StatelessWidget {
               return DataTable2(
                 columns: const [
                   DataColumn2(
-                    label: Text('Name'),
+                    label: Row(
+                      children: [
+                        Icon(Icons.train),
+                        Text(' Name'),
+                      ],
+                    ),
                   ),
                   DataColumn2(
                     label: Text('Velocity'),
@@ -222,10 +248,10 @@ class TrainsTable extends StatelessWidget {
                           ),
                         ),
                         DataCell(
-                          TrainUpdaterWidget(
-                            position: conductor.trainPosition,
-                            builder: (context, train) {
-                              return null;
+                          ValueListenableBuilder<List<TrackEdge>>(
+                            valueListenable: conductor.reservations,
+                            builder: (context, reservations, _) {
+                              return Text(reservations.join(','));
                             },
                           ),
                         ),
@@ -299,5 +325,27 @@ class TrackEdgeLength extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(edge.length.toString());
+  }
+}
+
+class TrackEdgeReserved extends StatelessWidget {
+  const TrackEdgeReserved({
+    super.key,
+    required this.reservation,
+  });
+
+  final ValueListenable<Dispatcher?> reservation;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Dispatcher?>(
+      valueListenable: reservation,
+      builder: (context, dispatcher, _) {
+        if (dispatcher == null) {
+          return const Text('N/A');
+        }
+        return Text(dispatcher.name);
+      },
+    );
   }
 }

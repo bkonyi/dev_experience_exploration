@@ -2,16 +2,38 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:trains/src/ui/trains_controller.dart';
 
 import 'src/ui/trains_viewer.dart';
 
 void main() {
-  runApp(const MyApp());
+  /*FlutterError.onError = (FlutterErrorDetails _) {
+    trainsController.centralDispatch.stopTheWorld();
+  };*/
+  final trainsController = TrainsController();
+  runZonedGuarded(
+    () {
+      WidgetsFlutterBinding.ensureInitialized();
+      runApp(MyApp(
+        controller: trainsController,
+      ));
+    },
+    (error, stack) {
+      trainsController.centralDispatch.stopTheWorld();
+    },
+  );
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({
+    super.key,
+    required this.controller,
+  });
+
+  final TrainsController controller;
 
   // This widget is the root of your application.
   @override
@@ -19,11 +41,14 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Trains!',
       theme: ThemeData(
-        colorScheme: ColorScheme.dark(),//ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: const ColorScheme
+            .dark(), //ColorScheme.fromSeed(seedColor: Colors.blue),
         //colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         //useMaterial3: true,
       ),
-      home: const TrainsAndTrackViewer(),
+      home: TrainsAndTrackViewer(
+        controller: controller,
+      ),
     );
   }
 }
