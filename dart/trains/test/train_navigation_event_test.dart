@@ -52,10 +52,10 @@ void main() {
           SendPort() => sendPort = message,
           TrainPositionEvent() => null,
           TrainNavigationCompleteEvent() => null,
-          TrackReservationRequest(:TrackEdge edge) => sendPort.send(
-              TrackReservationConfirmation(edge: edge),
+          TrackReservationRequest(element:TrackEdge edge) => sendPort.send(
+              TrackReservationConfirmation(element: edge),
             ),
-          TrackReservationRelease(edge: TrackEdge _) => null,
+          TrackReservationRelease(element: TrackEdge _) => null,
           Object() ||
           null =>
             throw StateError('Unrecognized message: $message'),
@@ -101,7 +101,7 @@ void main() {
         TrainDirectionEvent(train: train, direction: TrainDirection.backward),
         TrackReservationEvent(
           train: train,
-          edge: nodeA.reverseStraight!,
+          element: nodeA.reverseStraight!,
         ),
         TrainStartEvent(train: train),
         SwitchDirectionEvent(
@@ -111,7 +111,7 @@ void main() {
         ),
         TrackReservationEvent(
           train: train,
-          edge: nodeH.reverseStraight!,
+          element: nodeH.reverseStraight!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -127,7 +127,7 @@ void main() {
         TrainDirectionEvent(train: train, direction: TrainDirection.forward),
         TrackReservationEvent(
           train: train,
-          edge: nodeO.curve!,
+          element: nodeO.curve!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -137,7 +137,7 @@ void main() {
         TrainStartEvent(train: train),
         TrackReservationEvent(
           train: train,
-          edge: nodeJ.straight!,
+          element: nodeJ.straight!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -146,7 +146,7 @@ void main() {
         ),
         TrackReservationEvent(
           train: train,
-          edge: nodeK.straight!,
+          element: nodeK.straight!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -155,7 +155,7 @@ void main() {
         ),
         TrackReservationEvent(
           train: train,
-          edge: nodeT.straight!,
+          element: nodeT.straight!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -171,7 +171,7 @@ void main() {
         TrainDirectionEvent(train: train, direction: TrainDirection.backward),
         TrackReservationEvent(
           train: train,
-          edge: nodeY.reverseCurve!,
+          element: nodeY.reverseCurve!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -188,7 +188,7 @@ void main() {
         TrainDirectionEvent(train: train, direction: TrainDirection.forward),
         TrackReservationEvent(
           train: train,
-          edge: nodeZ.straight!,
+          element: nodeZ.straight!,
         ),
         SwitchDirectionEvent(
           train: train,
@@ -221,10 +221,10 @@ void main() {
           SendPort() => sendPort = message,
           TrainPositionEvent() => null,
           TrainNavigationCompleteEvent() => null,
-          TrackReservationRequest(:TrackEdge edge) => sendPort.send(
-              TrackReservationConfirmation(edge: edge),
+          TrackReservationRequest(element:TrackEdge edge) => sendPort.send(
+              TrackReservationConfirmation(element: edge),
             ),
-          TrackReservationRelease(edge: TrackEdge _) => null,
+          TrackReservationRelease(element: TrackEdge _) => null,
           Object() ||
           null =>
             throw StateError('Unrecognized message: $message'),

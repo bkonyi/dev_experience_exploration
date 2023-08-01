@@ -24,7 +24,7 @@ class TrainsAndTrackViewer extends StatefulWidget {
 
 class _TrainsAndTrackViewerState extends State<TrainsAndTrackViewer> {
   late final controller = widget.controller;
-  static const start = null;//'AC';
+  static const start = null; //'AC';
   static const String dest = 'N';
   static const int trainCount = 2;
   static const startDirection = TrainDirection.forward;
@@ -32,7 +32,7 @@ class _TrainsAndTrackViewerState extends State<TrainsAndTrackViewer> {
   @override
   void initState() {
     super.initState();
-    for (int i = 0; i < trainCount; ++i) {
+    /*for (int i = 0; i < trainCount; ++i) {
       controller.centralDispatch
           .spawnTrain(
         name: 'Train $i',
@@ -48,7 +48,26 @@ class _TrainsAndTrackViewerState extends State<TrainsAndTrackViewer> {
           ),
         );
       });
+    }*/
+    Future<void> helper() async {
+      final train0 = await controller.centralDispatch.spawnTrain(
+        name: 'Train 0',
+        startPosition: controller.track.nameToNode['B']!,
+      );
+
+      final train1 = await controller.centralDispatch.spawnTrain(
+        name: 'Train 1',
+        startPosition: controller.track.nameToNode['O']!,
+      );
+
+      final reservation = controller
+          .centralDispatch.reservations[controller.track.nameToNode['V']]!;
+      reservation.makeReservation(train1);
+      //train1.navigateTo(controller.track.nameToNode['V']!);
+      train0.navigateTo(controller.track.nameToNode['V']!);
     }
+
+    helper();
   }
 
   @override
@@ -248,7 +267,7 @@ class TrainsTable extends StatelessWidget {
                           ),
                         ),
                         DataCell(
-                          ValueListenableBuilder<List<TrackEdge>>(
+                          ValueListenableBuilder<List<TrackElement>>(
                             valueListenable: conductor.reservations,
                             builder: (context, reservations, _) {
                               return Text(reservations.join(','));

@@ -38,7 +38,7 @@ class TrainStopper {
   Timer? _stoppingTimer;
   Timer? _stoppedTimer;
 
-  Future<void> scheduleStop(double distance) {
+  Future<void> scheduleStopWithStationaryStart(double distance) {
     late double timeToTriggerStop;
     late double timeToStop;
 
@@ -67,7 +67,46 @@ class TrainStopper {
       timeToStop =
           train.physics.maxSpeed / train.physics.decelerationRate.abs();
     }
+    return _scheduleStop(timeToTriggerStop, timeToStop);
+  }
 
+  Future<void> scheduleStopForMovingTrain(double distance) {
+    // TODO(bkonyi): this should use polling logic rather than trying to
+    // perform a single calculation.
+    late double timeToTriggerStop;
+    late double timeToStop;
+
+    // TODO: this is assuming that the acceleration rate is the same as the
+    // deceleration rate.
+    if (train.physics.maxStoppingDistance > distance / 2) {
+      // The train won't be able to get to max speed before needing to decelerate.
+      timeToTriggerStop = sqrt(distance / train.physics.accelerationRate);
+      timeToStop = timeToTriggerStop;
+    } else {
+      // If the train can get to its max speed, we just need to find out how long
+      // it will take to get to (distance - maxStoppingDistance) and then set a
+      // timer to start decelerating at that point.
+      final decelarationThreshold =
+          distance - train.physics.maxStoppingDistance;
+
+      final distanceWhileAccelerating =
+          train.physics.distanceTravelledWhileAccelerating(distance);
+      final timeAccelerating = train.physics.timeToMaxSpeed;
+      final distanceWhileAtMaxSpeed =
+          decelarationThreshold - distanceWhileAccelerating;
+      final timeAtMaxSpeed = distanceWhileAtMaxSpeed / train.physics.maxSpeed;
+
+      timeToTriggerStop = timeAccelerating + timeAtMaxSpeed;
+      timeToStop =
+          train.physics.maxSpeed / train.physics.decelerationRate.abs();
+    }
+    return _scheduleStop(timeToTriggerStop, timeToStop);
+  }
+
+  Future<void> _scheduleStop(
+    double timeToTriggerStop,
+    double timeToStop,
+  ) async {
     final completer = Completer<void>();
     final eventLogger = train.conductor.log;
     eventLogger.fine('[$debugName] Scheduling stop in ${timeToTriggerStop}s');
@@ -124,7 +163,7 @@ class TrainStopEvent extends TrainNavigationEvent {
     await TrainStopper(
       train: train,
       debugName: 'Stop at ${destination.name}',
-    ).scheduleStop(distance);
+    ).scheduleStopWithStationaryStart(distance);
   }
 
   @override
@@ -152,7 +191,7 @@ class TrainStartEvent extends TrainNavigationEvent {
       throw StateError('Tried to start train that is moving!');
     }
     eventLogger.fine('Starting acceleration');
-    train.start();
+    await train.start();
   }
 
   @override
@@ -248,10 +287,10 @@ class SwitchDirectionEvent extends TrainNavigationEvent {
 class TrackReservationEvent extends TrainNavigationEvent {
   TrackReservationEvent({
     required super.train,
-    required this.edge,
+    required this.element,
   });
 
-  final TrackEdge edge;
+  final TrackElement element;
 
   @override
   Future<void> execute() async {
@@ -260,21 +299,23 @@ class TrackReservationEvent extends TrainNavigationEvent {
     // block until the reservation is granted, so we need to start stopping the
     // train if we are the train's stopping distance away from the beginning of
     // the track segment.
-    final distanceToEdge = train.position.distanceToEdgeFollowingPath(edge);
+    final distanceToEdge = element is TrackNode
+        ? train.position.distanceToNodeFollowingPath(element as TrackNode)
+        : train.position.distanceToEdgeFollowingPath(element as TrackEdge);
     final trainStopper = TrainStopper(
       train: train,
-      debugName: 'Stop before $edge',
+      debugName: 'Stop before $element',
     );
 
-    eventLogger.fine('Reserving $edge...');
+    eventLogger.fine('Reserving $element...');
     final reservationComplete =
-        train.conductor.sendTrackReservationRequest(edge);
+        train.conductor.sendTrackReservationRequest(element);
     if (!train.isStopped) {
-      trainStopper.scheduleStop(distanceToEdge);
+      trainStopper.scheduleStopWithStationaryStart(distanceToEdge);
     }
 
     await reservationComplete.then((_) {
-      eventLogger.fine('$edge reserved!');
+      eventLogger.fine('$element reserved!');
       if (trainStopper.isStopping) {
         eventLogger.fine('Started stopping while waiting for reservation!');
         // TODO(bkonyi): recalulate events
@@ -286,12 +327,12 @@ class TrackReservationEvent extends TrainNavigationEvent {
   @override
   bool operator ==(Object other) {
     if (other is! TrackReservationEvent) return false;
-    return edge == other.edge && train == other.train;
+    return element == other.element && train == other.train;
   }
 
   @override
-  String toString() => '[TrackReservationEvent] $edge';
-  
+  String toString() => '[TrackReservationEvent] $element';
+
   @override
-  int get hashCode => Object.hash(edge, train);
+  int get hashCode => Object.hash(element, train);
 }

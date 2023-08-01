@@ -65,19 +65,19 @@ class TrainNavigationCompleteEvent {
 }
 
 class TrackReservationRequest {
-  const TrackReservationRequest({required this.edge});
+  const TrackReservationRequest({required this.element});
 
-  final TrackEdge edge;
+  final TrackElement element;
 }
 
 class TrackReservationConfirmation {
-  const TrackReservationConfirmation({required this.edge});
+  const TrackReservationConfirmation({required this.element});
 
-  final TrackEdge edge;
+  final TrackElement element;
 }
 
 class TrackReservationRelease {
-  const TrackReservationRelease({required this.edge});
+  const TrackReservationRelease({required this.element});
 
-  final TrackEdge edge;
+  final TrackElement element;
 }

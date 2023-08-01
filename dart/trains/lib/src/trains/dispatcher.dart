@@ -4,7 +4,6 @@
 
 import 'dart:async';
 import 'dart:developer';
-import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
@@ -18,7 +17,10 @@ import 'dispatch_events.dart';
 class CentralDispatch {
   CentralDispatch({required this.track}) {
     for (final edge in track.edges) {
-      reservations[edge] = ReservationDetails(edge: edge);
+      reservations[edge] = ReservationDetails(element: edge);
+    }
+    for (final node in track.verticies) {
+      reservations[node] = ReservationDetails(element: node);
     }
   }
 
@@ -54,16 +56,16 @@ class CentralDispatch {
   }
 
   final Track track;
-  final reservations = <TrackEdge, ReservationDetails>{};
+  final reservations = <TrackElement, ReservationDetails>{};
 
   ValueListenable<Map<String, Dispatcher>> get dispatchers => _dispatchers;
   final _dispatchers = ValueNotifier<Map<String, Dispatcher>>({});
 }
 
 class ReservationDetails {
-  ReservationDetails({required this.edge});
+  ReservationDetails({required this.element});
 
-  final TrackEdge edge;
+  final TrackElement element;
   ValueListenable<Dispatcher?> get reservedBy => _reservedBy;
   final _reservedBy = ValueNotifier<Dispatcher?>(null);
   final queue = <({Dispatcher dispatcher, Completer<void> completer})>[];
@@ -75,7 +77,7 @@ class ReservationDetails {
       queue.add((dispatcher: dispatcher, completer: completer));
       await completer.future;
     }
-    dispatcher._reservations.value.add(edge);
+    dispatcher._reservations.value.add(element);
     // TODO
     dispatcher._reservations.notifyListeners();
     _reservedBy.value = dispatcher;
@@ -90,9 +92,9 @@ class ReservationDetails {
     }
     final released = dispatcher._reservations.value.removeAt(0);
     dispatcher._reservations.notifyListeners();
-    if (released != edge) {
+    if (released != element) {
       final error =
-          'Released edge ($released) does not match reservation ($edge)!';
+          'Released edge ($released) does not match reservation ($element)!';
       print(error);
       throw StateError(error);
     }
@@ -149,8 +151,8 @@ class Dispatcher {
         SendPort() => _initialize(message),
         TrainPositionEvent() => _trainPosition.value = message,
         TrainNavigationCompleteEvent() => _handleNavigationComplete(),
-        TrackReservationRequest(:TrackEdge edge) => _makeReservation(edge),
-        TrackReservationRelease(:TrackEdge edge) => _releaseReservation(edge),
+        TrackReservationRequest(:TrackElement element) => _makeReservation(element),
+        TrackReservationRelease(:TrackElement element) => _releaseReservation(element),
         ExceptionEvent() => centralDispatch.stopTheWorld(),
         Object() || null => throw StateError('Unrecognized message: $message'),
       };
@@ -168,8 +170,8 @@ class Dispatcher {
   ValueListenable<TrackNode?> get currentDestination => _currentDestination;
   final _currentDestination = ValueNotifier<TrackNode?>(null);
 
-  ValueListenable<List<TrackEdge>> get reservations => _reservations;
-  final _reservations = ValueNotifier<List<TrackEdge>>([]);
+  ValueListenable<List<TrackElement>> get reservations => _reservations;
+  final _reservations = ValueNotifier<List<TrackElement>>([]);
 
   final CentralDispatch centralDispatch;
   final Track track;
@@ -206,23 +208,23 @@ class Dispatcher {
   void _handleNavigationComplete() {
     _currentDestination.value = null;
     // TODO: remove
-    Future.delayed(const Duration(seconds: 3))
-        .then((_) => navigateTo(track.randomNode));
+    /*Future.delayed(const Duration(seconds: 3))
+        .then((_) => navigateTo(track.randomNode));*/
   }
 
-  Future<void> _makeReservation(TrackEdge edge) async {
-    final reservations = centralDispatch.reservations[edge]!;
+  Future<void> _makeReservation(TrackElement element) async {
+    final reservations = centralDispatch.reservations[element]!;
     await reservations.makeReservation(this);
-    sendPort.send(TrackReservationConfirmation(edge: edge));
+    sendPort.send(TrackReservationConfirmation(element: element));
   }
 
-  void _releaseReservation(TrackEdge edge) {
-    if (!centralDispatch.reservations.containsKey(edge)) {
+  void _releaseReservation(TrackElement element) {
+    if (!centralDispatch.reservations.containsKey(element)) {
       throw StateError(
-        "Attempted to release reservation for edge that doesn't exist: $edge",
+        "Attempted to release reservation for edge that doesn't exist: $element",
       );
     }
-    final reservations = centralDispatch.reservations[edge]!;
+    final reservations = centralDispatch.reservations[element]!;
     reservations.releaseReservation(this);
   }
 }

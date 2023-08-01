@@ -123,7 +123,9 @@ class Track {
 
 enum BranchDirection { straight, curve }
 
-class TrackNode {
+abstract class TrackElement {}
+
+class TrackNode extends TrackElement {
   TrackNode({
     required this.name,
   });
@@ -258,7 +260,7 @@ class TrackNode {
   int get hashCode => name.hashCode;
 }
 
-class TrackEdge {
+class TrackEdge extends TrackElement {
   TrackEdge({
     required this.length,
     required this.source,

@@ -34,6 +34,8 @@ class Train {
 
   bool _updatesActive = false;
 
+  Completer<void>? _waitingForTrainUpdateCompleter;
+
   void startTrainUpdates() {
     if (_updatesActive) return;
     _updatesActive = true;
@@ -42,8 +44,14 @@ class Train {
     _lastUpdate = DateTime.now();
     Timer.periodic(const Duration(milliseconds: updateFrequencyMs), (timer) {
       updatePosition(notify: timer.tick % (1000 / updateFrequencyMs) == 0);
+
+      // If the train has just started moving, inform the caller.
+      if (_waitingForTrainUpdateCompleter != null) {
+        _waitingForTrainUpdateCompleter!.complete();
+        _waitingForTrainUpdateCompleter = null;
+      }
       if (timer.tick % (1000 / updateFrequencyMs) == 0) {
-//        conductor.log.fine(this);
+        conductor.log.fine(this);
       }
     });
   }
@@ -94,8 +102,10 @@ class Train {
     position.changeDirection();
   }
 
-  void start() {
+  Future<void> start() {
     physics.stopping = false;
+      _waitingForTrainUpdateCompleter ??= Completer<void>();
+    return _waitingForTrainUpdateCompleter!.future;
   }
 
   /// Tells the train to come to a stop.
@@ -348,6 +358,15 @@ class TrainPosition {
       }
       return;
     }
+
+    // If the train was starting a new path, the first reservation will be
+    // the start node. We need to release that first.
+    final currentReservations = train.conductor.currentReservations;
+    if (currentReservations.isNotEmpty &&
+        currentReservations.first is TrackNode) {
+      train.conductor.sendTrackReservationRelease(edge.source);
+    }
+
     offset += distanceTravelled;
     while (offset > edge.length) {
       offset = offset - edge.length;
@@ -362,6 +381,7 @@ class TrainPosition {
         log.fine('Train speed: ${train.physics.currentVelocity.abs()}');
         log.fine('Train stopping: ${train.physics.stopping}');
       }
+
       if (currentEdge != null && !isAlmostStopped) {
         if (!train.conductor.edgePath.contains(currentEdge)) {
           dumpTrainState();
@@ -376,7 +396,10 @@ class TrainPosition {
           );
         }
       }
+      log.fine('Releasing ${previous} and ${previous!.destination}');
+      log.fine('Reservations: ${train.conductor.currentReservations}');
       train.conductor.sendTrackReservationRelease(previous!);
+      train.conductor.sendTrackReservationRelease(previous.destination);
     }
 
     if (currentEdge == null) {
@@ -437,6 +460,36 @@ class TrainPosition {
         break;
       }
       distance += edge.length;
+    }
+
+    if (!found) {
+      throw StateError(
+        'Was unable to find $target on ${train.conductor.edgePath}',
+      );
+    }
+    // Subtract the offset of the train as the train could be in the middle of
+    // the first edge.
+    distance -= train.position.offset;
+    return distance;
+  }
+
+  /// Returns the distance to the [target] node following the current path
+  /// outlined by the train conductor.
+  double distanceToNodeFollowingPath(TrackNode target) {
+    double distance = 0.0;
+    bool found = false;
+
+    // The distance to the first node is always 0.
+    if (train.conductor.edgePath.first.source == target) {
+      found = true;
+    } else {
+      for (final edge in train.conductor.edgePath) {
+        distance += edge.length;
+        if (edge.destination == target) {
+          found = true;
+          break;
+        }
+      }
     }
 
     if (!found) {

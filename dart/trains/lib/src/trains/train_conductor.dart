@@ -57,10 +57,10 @@ class TrainConductor {
     Logger.root.onRecord.listen((record) {
       if (record.stackTrace != null) {
         print(
-            '[${record.loggerName}] EXCEPTION: ${record.message}\n${record.stackTrace}');
+            '[${DateTime.now()}][${record.loggerName}] EXCEPTION: ${record.message}\n${record.stackTrace}');
         return;
       }
-      print('[${record.loggerName}] ${record.message}');
+      print('[${DateTime.now()}][${record.loggerName}] ${record.message}');
     });
     receivePort.listen(_messageHandler);
     sendPort.send(receivePort.sendPort);
@@ -72,7 +72,7 @@ class TrainConductor {
   final String name;
   final Track track;
   final edgePath = <TrackEdge>[];
-  final currentReservations = <TrackEdge>[];
+  final currentReservations = <TrackElement>[];
   final events = <TrainNavigationEvent>[];
   late final Train train;
 
@@ -124,32 +124,37 @@ class TrainConductor {
     sendPort.send(event);
   }
 
-  Future<void> sendTrackReservationRequest(TrackEdge edge) async {
-    if (!edgePath.contains(edge)) {
+  Future<void> sendTrackReservationRequest(TrackElement element) async {
+    if (element is TrackEdge && !edgePath.contains(element)) {
       throw StateError(
-        'Attempted to reserve $edge, which is not in $edgePath!',
+        'Attempted to reserve $element, which is not in $edgePath!',
       );
     }
-    sendPort.send(TrackReservationRequest(edge: edge));
+    sendPort.send(TrackReservationRequest(element: element));
     _trackReservationResponseCompleter = Completer<void>();
     await _trackReservationResponseCompleter!.future;
-    log.fine('Reserved $edge!');
-    currentReservations.add(edge);
+    log.fine('Reserved $element!');
+    currentReservations.add(element);
     return;
   }
 
-  void sendTrackReservationRelease(TrackEdge edge) {
-    log.fine('Releasing reservation for $edge');
-    final expected = edgePath.removeAt(0);
+  void sendTrackReservationRelease(TrackElement element) {
+    log.fine('Releasing reservation for $element');
+    log.fine('Current reservations: $currentReservations');
     currentReservations.removeAt(0);
     log.fine('Remaining path: $edgePath');
     log.fine('Remaining reservations: $currentReservations');
-    if (expected != edge) {
-      throw StateError(
-        'Attempted to release reservation for $edge when the expected edge is $expected',
-      );
+
+    // TODO(bkonyi): check for nodes as well.
+    if (element is TrackEdge) {
+      final expected = edgePath.removeAt(0);
+      if (expected != element) {
+        throw StateError(
+          'Attempted to release reservation for $element when the expected edge is $expected',
+        );
+      }
     }
-    sendPort.send(TrackReservationRelease(edge: edge));
+    sendPort.send(TrackReservationRelease(element: element));
   }
 
   /// Creates a sequence of [TrainNavigationEvent]s based on a valid path.
@@ -184,9 +189,18 @@ class TrainConductor {
     }
 
     // Acquire the first track reservation before starting to move.
+    // TODO(bkonyi): this reservation is required for correctness.
     events.add(TrackReservationEvent(
       train: train,
-      edge: edge,
+      element: current,
+    ));
+    events.add(TrackReservationEvent(
+      train: train,
+      element: edge,
+    ));
+    events.add(TrackReservationEvent(
+      train: train,
+      element: path[1],
     ));
 
     // Start moving.
@@ -196,15 +210,6 @@ class TrainConductor {
       final next = path[i + 1];
       final (edge, branch, direction) =
           _determineNextEdge(from: current, to: next);
-
-      // Special case. We can't start moving until we've reserved the first
-      // track edge.
-      /*if (i != 0) {
-        events.add(TrackReservationEvent(
-          train: train,
-          edge: edge,
-        ));
-      }*/
 
       // The train needs to stop when changing direction, so terminate the
       // navigation event and start the next one.
@@ -225,7 +230,12 @@ class TrainConductor {
 
         events.add(TrackReservationEvent(
           train: train,
-          edge: edge,
+          element: edge,
+        ));
+
+        events.add(TrackReservationEvent(
+          train: train,
+          element: next,
         ));
 
         // Ensure the switch is set to the right direction. This needs to be
@@ -246,10 +256,17 @@ class TrainConductor {
         currentDirection = direction;
         segmentLength = 0.0;
       } else {
+        // Special case. We can't start moving until we've reserved the first
+        // track edge.
         if (i != 0) {
           events.add(TrackReservationEvent(
             train: train,
-            edge: edge,
+            element: edge,
+          ));
+
+          events.add(TrackReservationEvent(
+            train: train,
+            element: next,
           ));
         }
 

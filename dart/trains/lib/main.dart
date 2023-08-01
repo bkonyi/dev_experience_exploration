@@ -22,6 +22,8 @@ void main() {
       ));
     },
     (error, stack) {
+      print(error);
+      print(stack);
       trainsController.centralDispatch.stopTheWorld();
     },
   );
